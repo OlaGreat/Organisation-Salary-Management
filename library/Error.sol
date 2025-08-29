@@ -2,5 +2,5 @@
 pragma solidity ^0.8.10;
 
 library Error {
-
+    error INVALID_ADDRESS();
 }
