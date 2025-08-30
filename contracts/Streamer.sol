@@ -18,7 +18,7 @@ contract Streamer is IEmployeeManagement{
    mapping (address => bytes) addressToInviteHash;
 
     constructor(string memory _organisationName, string memory _organisationSymbol, address _owner){
-       require(address != address (0), INVALID_ADDRESS());
+       require(address != address (0), error.INVALID_ADDRESS());
        organisationName = _organisationName;
        organisationSymbol = _organisationSymbol;
        owner = _owner;
