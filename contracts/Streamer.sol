@@ -124,6 +124,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         _accrue(msg.sender); // no‑op first time
         addressToEmployee[msg.sender].monthlySalary = inv.salary;
         addressToEmployee[msg.sender].status = Status.ACTIVE;
+        addressToEmployee[msg.sender].id = employees.length;
 
         // Payroll totals and accrual start
         totalMonthlySalary += inv.salary;
