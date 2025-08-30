@@ -5,7 +5,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import "../interfaces/IEmployeeManagement.sol"; // assumes Employee struct + Status enum exposed
+import "../interfaces/IEmployeeManagement.sol";
+import "../library/Error.sol";
+import "../library/Utils.sol";
 
 /**
  * Notes
@@ -19,9 +21,6 @@ import "../interfaces/IEmployeeManagement.sol"; // assumes Employee struct + Sta
 contract Streamer is IEmployeeManagement, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Storage
-    // ─────────────────────────────────────────────────────────────────────────────
     string public organisationName;
     string public organisationSymbol;
 
@@ -30,39 +29,33 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
 
     mapping(address => bool) public isAdmin;
 
-    // Core employee storage (struct defined in IEmployeeManagement)
     mapping(address => Employee) internal addressToEmployee;
-    Employee[] internal employees; // snapshot list (best effort)
+    Employee[] internal employees;
 
-    // Book‑keeping
+
     bool public allowWithdrawal = true;
-    uint256 public totalMonthlySalary; // sum of all active employees' monthlySalary
+    uint256 public totalMonthlySalary;
 
-    // Invite handling with nonce to prevent preimage/replay collisions
     struct Invite {
         bytes32 hash;
         uint256 salary;
-        bool used; // set true on accept/reject
+        bool used;
     }
     mapping(address => Invite) public invites;
 
-    // Streaming accrual state (kept outside Employee struct for interface safety)
-    mapping(address => uint256) public lastAccrued; // timestamp of last accrual
+    mapping(address => uint256) public lastAccrued;
 
-    // Constants
-    uint256 private constant SECONDS_PER_MONTH = 30 days; // simple 30‑day month
+    uint256 private constant SECONDS_PER_MONTH = 30 days;
 
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // Modifiers
-    // ─────────────────────────────────────────────────────────────────────────────
+
     modifier OnlyAdmin() {
-        require(isAdmin[msg.sender], "Only Admin");
+        require(isAdmin[msg.sender], Error.ONLY_OWNER());
         _;
     }
 
     modifier OnlyOwner() {
-        require(msg.sender == owner, "Only Owner");
+        require(msg.sender == owner, Error.ONLY_OWNER());
         _;
     }
 
@@ -75,7 +68,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         string memory _organisationSymbol,
         address _owner
     ) {
-        require(_tokenAddress != address(0) && _owner != address(0), "Zero addr");
+        require(_tokenAddress != address(0) && _owner != address(0), Error.INVALID_ADDRESS());
         salaryToken = IERC20(_tokenAddress);
         organisationName = _organisationName;
         organisationSymbol = _organisationSymbol;
@@ -87,7 +80,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // Treasury
     // ─────────────────────────────────────────────────────────────────────────────
     function depositToTreasury(uint256 _amount) external {
-        require(_amount > 0, "Zero deposit");
+        require(_amount > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
         salaryToken.safeTransferFrom(msg.sender, address(this), _amount);
         emit TreasuryDeposited(msg.sender, _amount);
     }
@@ -100,9 +93,9 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // Invites & Hiring
     // ─────────────────────────────────────────────────────────────────────────────
     function inviteEmployee(address _employee, uint256 _salary) external OnlyAdmin returns (bytes32) {
-        require(_employee != address(0), "Zero employee");
-        require(_salary > 0, "Zero salary");
-        require(addressToEmployee[_employee].status != Status.ACTIVE, "Already active");
+        require(_employee != address(0), Error.INVALID_ADDRESS());
+        require(_salary > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
+        require(addressToEmployee[_employee].status != Status.ACTIVE, Error.EMPLOYEE_ALREADY_ACTIVE());
 
         // nonce includes current block + caller for uniqueness
         bytes32 inviteHash = keccak256(abi.encodePacked(address(this), _employee, _salary, msg.sender, block.timestamp));
@@ -117,8 +110,8 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
 
     function employeeAcceptInvite(bytes32 _inviteHash) external {
         Invite storage inv = invites[msg.sender];
-        require(!inv.used, "Invite used");
-        require(inv.hash != bytes32(0) && inv.hash == _inviteHash, "Bad invite");
+        require(!inv.used, Error.INVITE_USED());
+        require(inv.hash != bytes32(0) && inv.hash == _inviteHash, Error.INVALID_INVITE_CODE());
 
         // Create / update employee record
         _accrue(msg.sender); // no‑op first time
@@ -139,8 +132,8 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
 
     function employeeRejectInvite(bytes32 _inviteHash) external {
         Invite storage inv = invites[msg.sender];
-        require(!inv.used, "Invite used");
-        require(inv.hash != bytes32(0) && inv.hash == _inviteHash, "Bad invite");
+        require(!inv.used, Error.INVITE_USED());
+        require(inv.hash != bytes32(0) && inv.hash == _inviteHash, Error.INVALID_INVITE_CODE());
 
         addressToEmployee[msg.sender].status = Status.REJECTED_INVITE;
         inv.used = true;
@@ -151,42 +144,42 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────────────────────
     // Accrual (streaming per second)
     // ─────────────────────────────────────────────────────────────────────────────
-    function _accrue(address _emp) internal {
-        if (addressToEmployee[_emp].status != Status.ACTIVE) return;
-        uint256 last = lastAccrued[_emp];
-        if (last == 0) {
-            lastAccrued[_emp] = block.timestamp;
+    function _accrue(address _employeeAddress) internal {
+        if (addressToEmployee[_employeeAddress].status != Status.ACTIVE) return;
+        uint256 last = lastAccrued[_employeeAddress];
+        if (last == Utils.ZERO) {
+            lastAccrued[_employeeAddress] = block.timestamp;
             return;
         }
-        uint256 dt = block.timestamp - last;
-        if (dt == 0) return;
+        uint256 deltaTime = block.timestamp - last;
+        if (deltaTime == Utils.ZERO) return;
 
-        uint256 msal = addressToEmployee[_emp].monthlySalary;
-        if (msal == 0) {
-            lastAccrued[_emp] = block.timestamp;
+        uint256 _monthlySalary = addressToEmployee[_employeeAddress].monthlySalary;
+        if (_monthlySalary == Utils.ZERO) {
+            lastAccrued[_employeeAddress] = block.timestamp;
             return;
         }
 
         // accrue = monthlySalary * dt / 30 days
-        uint256 earned = (msal * dt) / SECONDS_PER_MONTH;
-        if (earned > 0) {
-            addressToEmployee[_emp].availableBalance += earned;
-            addressToEmployee[_emp].totalAccruedEarnings += earned;
+        uint256 earned = (_monthlySalary * deltaTime) / SECONDS_PER_MONTH;
+        if (earned > Utils.ZERO) {
+            addressToEmployee[_employeeAddress].availableBalance += earned;
+            addressToEmployee[_employeeAddress].totalAccruedEarnings += earned;
         }
-        lastAccrued[_emp] = block.timestamp;
+        lastAccrued[_employeeAddress] = block.timestamp;
     }
 
     function accrueMe() external {
         _accrue(msg.sender);
     }
 
-    function accrueEmployee(address _emp) external OnlyAdmin {
-        _accrue(_emp);
+    function accrueEmployee(address _employeeAddress) external OnlyAdmin {
+        _accrue(_employeeAddress);
     }
 
-    function accrueMany(address[] calldata _emps) external OnlyAdmin {
-        for (uint256 i = 0; i < _emps.length; i++) {
-            _accrue(_emps[i]);
+    function accrueMany(address[] calldata _employeeAddresses) external OnlyAdmin {
+        for (uint256 i = 0; i < _employeeAddresses.length; i++) {
+            _accrue(_employeeAddresses[i]);
         }
     }
 
@@ -194,11 +187,11 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // Withdrawals
     // ─────────────────────────────────────────────────────────────────────────────
     function withdrawSalary(uint256 _amount) external nonReentrant {
-        require(allowWithdrawal, "Withdrawals paused");
-        require(_amount > 0, "Zero amount");
+        require(allowWithdrawal, Error.WITHDRAWAL_PAUSED());
+        require(_amount > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
 
         _accrue(msg.sender);
-        require(_amount <= addressToEmployee[msg.sender].availableBalance, "Insufficient avail");
+        require(_amount <= addressToEmployee[msg.sender].availableBalance, Error.INSUFFICIENT_BALANCE());
 
         addressToEmployee[msg.sender].availableBalance -= _amount;
         addressToEmployee[msg.sender].totalWithdrawn += _amount;
@@ -210,37 +203,36 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────────────────────
     // Admin controls
     // ─────────────────────────────────────────────────────────────────────────────
-    function updateEmployeeStatus(address employeeAddress, Status _status) external OnlyAdmin {
-        Status old = addressToEmployee[employeeAddress].status;
-        if (old == _status) return;
+    function updateEmployeeStatus(address employeeAddress, Status _newStatus) external OnlyAdmin {
+        Status oldStatus = addressToEmployee[employeeAddress].status;
+        if (oldStatus == _newStatus) return;
 
         // Adjust payroll totals on active <-> non‑active transitions
-        if (old == Status.ACTIVE && _status != Status.ACTIVE) {
+        if (oldStatus == Status.ACTIVE && _newStatus != Status.ACTIVE) {
             _accrue(employeeAddress);
             totalMonthlySalary -= addressToEmployee[employeeAddress].monthlySalary;
-        } else if (old != Status.ACTIVE && _status == Status.ACTIVE) {
+        } else if (oldStatus != Status.ACTIVE && _newStatus == Status.ACTIVE) {
             lastAccrued[employeeAddress] = block.timestamp;
             totalMonthlySalary += addressToEmployee[employeeAddress].monthlySalary;
         }
-        addressToEmployee[employeeAddress].status = _status;
-        emit EmployeeStatusUpdated(employeeAddress, old, _status);
+        addressToEmployee[employeeAddress].status = _newStatus;
+        emit EmployeeStatusUpdated(employeeAddress, oldStatus, _newStatus);
     }
 
     function updateMonthlySalary(address employeeAddress, uint256 newMonthlySalary) external OnlyAdmin {
-        require(newMonthlySalary > 0, "Zero salary");
+        require(newMonthlySalary > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
         _accrue(employeeAddress);
 
-        uint256 old = addressToEmployee[employeeAddress].monthlySalary;
+        uint256 oldSalary = addressToEmployee[employeeAddress].monthlySalary;
         if (addressToEmployee[employeeAddress].status == Status.ACTIVE) {
-            // keep payroll total in sync
-            if (newMonthlySalary >= old) {
-                totalMonthlySalary += (newMonthlySalary - old);
+            if (newMonthlySalary >= oldSalary) {
+                totalMonthlySalary += (newMonthlySalary - oldSalary);
             } else {
-                totalMonthlySalary -= (old - newMonthlySalary);
+                totalMonthlySalary -= (oldSalary - newMonthlySalary);
             }
         }
         addressToEmployee[employeeAddress].monthlySalary = newMonthlySalary;
-        emit SalaryUpdated(employeeAddress, old, newMonthlySalary);
+        emit SalaryUpdated(employeeAddress, oldSalary, newMonthlySalary);
     }
 
     function emergencyPause() external OnlyAdmin {
@@ -254,7 +246,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     }
 
     function addAdmin(address newAdmin) external OnlyOwner {
-        require(newAdmin != address(0), "Zero admin");
+        require(newAdmin != address(0), Error.INVALID_ADDRESS());
         isAdmin[newAdmin] = true;
         emit AdminAdded(newAdmin);
     }
@@ -266,7 +258,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
 
     // Owner can recover tokens (including salaryToken) in emergencies / shutdowns
     function emergencyRecoverToken(address token, address to, uint256 amount) external OnlyOwner {
-        require(to != address(0), "Zero to");
+        require(to != address(0), Error.INVALID_ADDRESS());
         IERC20(token).safeTransfer(to, amount);
         emit EmergencyTokenRecovered(token, to, amount);
     }
@@ -307,7 +299,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     }
 
     function adminGetEmployeeInfoById(uint256 _id) external view returns (Employee memory) {
-        require(_id < employees.length, "Invalid Id");
+        require(_id < employees.length, Error.INVALID_ID());
         return employees[_id];
     }
 
@@ -316,4 +308,8 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         // Mirrors inviteEmployee encoder. Not strictly necessary but helps frontend testing.
         return keccak256(abi.encodePacked(address(this), _employee, _salary, _inviter, _timestampSeed));
     }
+
+    // Lock employee salary that has not been  withdrawn at the end of the month so employer will not take it out;
+    // if employee salary is not withdrawn within 3 months, employer can take it out.
+    // if employer what to penalize employee for misconduct, or for any other reason, employer can take out the salary
 }
