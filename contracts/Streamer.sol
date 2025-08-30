@@ -264,6 +264,22 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         emit AdminRemoved(adminToRemove);
     }
 
+    function punishEmployee(address employeeAddress, uint256 penaltyAmount) external OnlyAdmin {
+        require(penaltyAmount > 0, "Zero penalty");
+        require(addressToEmployee[employeeAddress].status == Status.ACTIVE, "Not active");
+
+        _accrue(employeeAddress); // bring balances current
+
+        Employee storage emp = addressToEmployee[employeeAddress];
+        require(penaltyAmount <= emp.availableBalance, "Penalty exceeds balance");
+
+        emp.availableBalance -= penaltyAmount;
+        emp.totalAccruedEarnings -= penaltyAmount; // reflect reduction in total earnings
+
+        emit EmployeePunished(employeeAddress, penaltyAmount);
+    }
+
+
     // Owner can recover tokens (including salaryToken) in emergencies / shutdowns
     function emergencyRecoverToken(address token, address to, uint256 amount) external OnlyOwner {
         require(to != address(0), "Zero to");
@@ -293,6 +309,22 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     function getMonthlySalary() external view returns (uint256) {
         return addressToEmployee[msg.sender].monthlySalary;
     }
+
+    function getAvailableEarnings(address employeeAddress) public view returns (uint256) {
+    Employee memory emp = addressToEmployee[employeeAddress];
+    if (emp.status != Status.ACTIVE) return emp.availableBalance;
+
+    // How much time has passed since lastAccrued
+    uint256 elapsed = block.timestamp - lastAccrued[employeeAddress];
+
+    // Accrued per second
+    uint256 perSecond = emp.monthlySalary / (30 days);
+
+    uint256 pending = elapsed * perSecond;
+
+    return emp.availableBalance + pending;
+}
+
 
     function getEmployeeStatus() external view returns (Status) {
         return addressToEmployee[msg.sender].status;

@@ -31,6 +31,5 @@ interface IEmployeeManagement {
     event AdminRemoved(address indexed admin);
     event EmergencyPause(bool paused);
     event EmergencyTokenRecovered(address indexed token, address indexed to, uint256 amount);
-
-
+    event EmployeePunished(address indexed employee, uint256 amount);
 }
