@@ -12,11 +12,25 @@ interface IEmployeeManagement {
     }
 
     enum Status {
-        PENDING,
+        INVITED,
         ACTIVE,
         INACTIVE,
         TERMINATED,
-        REJECTED
+        REJECTED_INVITE
     }
+
+
+    event TreasuryDeposited(address indexed from, uint256 amount);
+    event EmployeeInvited(address indexed employee, uint256 salary, bytes32 inviteHash);
+    event EmployeeAccepted(address indexed employee, uint256 salary);
+    event EmployeeRejected(address indexed employee);
+    event EmployeeStatusUpdated(address indexed employee, Status oldStatus, Status newStatus);
+    event SalaryUpdated(address indexed employee, uint256 oldSalary, uint256 newSalary);
+    event Withdrawal(address indexed employee, uint256 amount);
+    event AdminAdded(address indexed admin);
+    event AdminRemoved(address indexed admin);
+    event EmergencyPause(bool paused);
+    event EmergencyTokenRecovered(address indexed token, address indexed to, uint256 amount);
+
 
 }
