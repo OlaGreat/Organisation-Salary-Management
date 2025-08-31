@@ -9,6 +9,8 @@ import "../interfaces/IEmployeeManagement.sol";
 import "../library/Error.sol";
 import "../library/Utils.sol";
 
+import "../interfaces/IFactory.sol";
+
 /**
  * Notes
  * - Adds real employee lifecycle (invite → accept/reject → active/inactive)
@@ -25,6 +27,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     string public organisationSymbol;
 
     IERC20 public salaryToken;
+    IFactory factory;
     address public owner;
 
     mapping(address => bool) public isAdmin;
@@ -66,10 +69,12 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         address _tokenAddress,
         string memory _organisationName,
         string memory _organisationSymbol,
-        address _owner
+        address _owner,
+        address _factory
     ) {
         require(_tokenAddress != address(0) && _owner != address(0), Error.INVALID_ADDRESS());
         salaryToken = IERC20(_tokenAddress);
+        factory = IFactory(_factory);
         organisationName = _organisationName;
         organisationSymbol = _organisationSymbol;
         owner = _owner;
@@ -103,6 +108,7 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
 
         // mark status as INVITED for visibility
         addressToEmployee[_employee].status = Status.INVITED;
+        factory.registerEmployee(msg.sender, address(this));
 
         emit EmployeeInvited(_employee, _salary, inviteHash);
         return inviteHash;
