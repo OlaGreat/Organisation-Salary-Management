@@ -11,4 +11,5 @@ library Error {
     error WITHDRAWAL_PAUSED();
     error INSUFFICIENT_BALANCE();
     error INVALID_ID();
+    error NOT_VALID_ORGANISATION();
 }

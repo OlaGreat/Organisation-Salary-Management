@@ -4,6 +4,11 @@ pragma solidity ^0.8.10;
 interface IEmployeeManagement {
     struct Employee{
         uint256  id;
+        string firstName;
+        string lastName;
+        string position;
+        string department;
+        uint256 date_hired;
         uint256 monthlySalary;
         Status  status;
         uint256 totalWithdrawn;
