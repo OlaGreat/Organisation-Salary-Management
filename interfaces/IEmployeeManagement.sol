@@ -46,9 +46,9 @@ interface IEmployeeManagement {
     function employeeAcceptInvite(bytes32 _inviteHash) external;
     function employeeRejectInvite(bytes32 _inviteHash) external;
 
-    function accrueMe() external;
-    function accrueEmployee(address _employeeAddress) external;
-    function accrueMany(address[] calldata _employeeAddresses) external;
+    // function accrueMe() external;
+    // function accrueEmployee(address _employeeAddress) external;
+    // function accrueMany(address[] calldata _employeeAddresses) external;
 
     function withdrawSalary(uint256 _amount) external;
 

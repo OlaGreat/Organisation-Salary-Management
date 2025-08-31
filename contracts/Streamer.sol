@@ -175,19 +175,19 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         lastAccrued[_employeeAddress] = block.timestamp;
     }
 
-    function accrueMe() external {
-        _accrue(msg.sender);
-    }
+    // function accrueMe() external {
+    //     _accrue(msg.sender);
+    // }
 
-    function accrueEmployee(address _employeeAddress) external OnlyAdmin {
-        _accrue(_employeeAddress);
-    }
+    // function accrueEmployee(address _employeeAddress) external OnlyAdmin {
+    //     _accrue(_employeeAddress);
+    // }
 
-    function accrueMany(address[] calldata _employeeAddresses) external OnlyAdmin {
-        for (uint256 i = 0; i < _employeeAddresses.length; i++) {
-            _accrue(_employeeAddresses[i]);
-        }
-    }
+    // function accrueMany(address[] calldata _employeeAddresses) external OnlyAdmin {
+    //     for (uint256 i = 0; i < _employeeAddresses.length; i++) {
+    //         _accrue(_employeeAddresses[i]);
+    //     }
+    // }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Withdrawals

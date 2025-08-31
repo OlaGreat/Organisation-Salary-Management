@@ -21,6 +21,11 @@ const config: HardhatUserConfig = {
       }
     ]
   },
+  contractSizer: {
+    alphaSort: true,
+    runOnCompile: true,
+    disambiguatePaths: false,
+  },
   sourcify: {
     enabled: false
   },
