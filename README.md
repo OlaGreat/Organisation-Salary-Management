@@ -12,5 +12,5 @@ npx hardhat node
 npx hardhat ignition deploy ./ignition/modules/Lock.ts
 ```
 
-Factory - 0x9f078c3B5c1F6c34e14DB9Bce07F62653282eb11  
+Factory - 0x9E82c8a144705805AEa044aF699BEb6799d077F0  
 StreamPayToken - 0x51b5C6eE4302a7498b5a6986c58ebBFb5A9b25Ec

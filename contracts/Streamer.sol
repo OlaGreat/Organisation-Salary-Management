@@ -43,6 +43,11 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
         bytes32 hash;
         uint256 salary;
         bool used;
+        string firstName;
+        string lastName;
+        string position;
+        string department;
+        uint256 date_hired;
     }
     mapping(address => Invite) public invites;
 
@@ -97,44 +102,73 @@ contract Streamer is IEmployeeManagement, ReentrancyGuard {
     // ─────────────────────────────────────────────────────────────────────────────
     // Invites & Hiring
     // ─────────────────────────────────────────────────────────────────────────────
-    function inviteEmployee(address _employee, uint256 _salary) external OnlyAdmin returns (bytes32) {
-        require(_employee != address(0), Error.INVALID_ADDRESS());
-        require(_salary > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
-        require(addressToEmployee[_employee].status != Status.ACTIVE, Error.EMPLOYEE_ALREADY_ACTIVE());
+    function inviteEmployee(
+    address _employee,
+    uint256 _salary,
+    string memory _firstName,
+    string memory _lastName,
+    string memory _position,
+    string memory _department,
+    uint256 _date_hired
+) external OnlyAdmin returns (bytes32) {
+    require(_employee != address(0), Error.INVALID_ADDRESS());
+    require(_salary > Utils.ZERO, Error.ZERO_AMOUNT_INVALID_AMOUNT());
+    require(addressToEmployee[_employee].status != Status.ACTIVE, Error.EMPLOYEE_ALREADY_ACTIVE());
 
-        // nonce includes current block + caller for uniqueness
-        bytes32 inviteHash = keccak256(abi.encodePacked(address(this), _employee, _salary, msg.sender, block.timestamp));
-        invites[_employee] = Invite({hash: inviteHash, salary: _salary, used: false});
+    // nonce includes current block + caller for uniqueness
+    bytes32 inviteHash = keccak256(
+        abi.encodePacked(address(this), _employee, _salary, msg.sender, block.timestamp)
+    );
 
-        // mark status as INVITED for visibility
-        addressToEmployee[_employee].status = Status.INVITED;
-        factory.registerEmployee(msg.sender, address(this));
+    invites[_employee] = Invite({
+        hash: inviteHash,
+        salary: _salary,
+        used: false,
+        firstName: _firstName,
+        lastName: _lastName,
+        position: _position,
+        department: _department,
+        date_hired: _date_hired
+    });
 
-        emit EmployeeInvited(_employee, _salary, inviteHash);
-        return inviteHash;
-    }
+    factory.registerEmployee(_employee, address(this));
 
-    function employeeAcceptInvite(bytes32 _inviteHash) external {
-        Invite storage inv = invites[msg.sender];
-        require(!inv.used, Error.INVITE_USED());
-        require(inv.hash != bytes32(0) && inv.hash == _inviteHash, Error.INVALID_INVITE_CODE());
+    // mark status as INVITED for visibility
+    addressToEmployee[_employee].status = Status.INVITED;
 
-        // Create / update employee record
-        _accrue(msg.sender); // no‑op first time
-        addressToEmployee[msg.sender].monthlySalary = inv.salary;
-        addressToEmployee[msg.sender].status = Status.ACTIVE;
-        addressToEmployee[msg.sender].id = employees.length;
+    emit EmployeeInvited(_employee, _salary, inviteHash);
+    return inviteHash;
+}
 
-        // Payroll totals and accrual start
-        totalMonthlySalary += inv.salary;
-        lastAccrued[msg.sender] = block.timestamp;
+function employeeAcceptInvite(bytes32 _inviteHash) external {
+    Invite storage inv = invites[msg.sender];
+    require(!inv.used, Error.INVITE_USED());
+    require(inv.hash != bytes32(0) && inv.hash == _inviteHash, Error.INVALID_INVITE_CODE());
 
-        // Best‑effort snapshot push (won't auto‑sync)
-        employees.push(addressToEmployee[msg.sender]);
+    // Create / update employee record
+    _accrue(msg.sender); // no-op first time
+    addressToEmployee[msg.sender].id = employees.length;
+    addressToEmployee[msg.sender].firstName = inv.firstName;
+    addressToEmployee[msg.sender].lastName = inv.lastName;
+    addressToEmployee[msg.sender].position = inv.position;
+    addressToEmployee[msg.sender].department = inv.department;
+    addressToEmployee[msg.sender].date_hired = inv.date_hired;
+    addressToEmployee[msg.sender].monthlySalary = inv.salary;
+    addressToEmployee[msg.sender].status = Status.ACTIVE;
 
-        inv.used = true;
-        emit EmployeeAccepted(msg.sender, inv.salary);
-    }
+    // Payroll totals and accrual start
+    totalMonthlySalary += inv.salary;
+    lastAccrued[msg.sender] = block.timestamp;
+
+    // Best-effort snapshot push (won't auto-sync)
+    employees.push(addressToEmployee[msg.sender]);
+
+    inv.used = true;
+
+    
+    emit EmployeeAccepted(msg.sender, inv.salary);
+}
+
 
     function employeeRejectInvite(bytes32 _inviteHash) external {
         Invite storage inv = invites[msg.sender];

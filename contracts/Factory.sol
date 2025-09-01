@@ -7,8 +7,8 @@ import "../library/Utils.sol";
 
 contract Factory {
 
-  mapping (address => address[]) ownerToOrganisations;
-  mapping (address => address[]) employeeToOrganisations;
+  mapping (address => address[]) public ownerToOrganisations;
+  mapping (address => address[]) public employeeToOrganisations;
   mapping (address => bool) isOrganisation;
   address[] allOrganisations;
   constructor(){
@@ -30,8 +30,10 @@ contract Factory {
     return employeeToOrganisations[msg.sender];
   }
 
+  error NotEmployee(address[] employee);
   function registerEmployee(address employee, address organisation) external {
     require(isOrganisation[msg.sender], Error.NOT_VALID_ORGANISATION());
+    
     employeeToOrganisations[employee].push(organisation);
 }
 }

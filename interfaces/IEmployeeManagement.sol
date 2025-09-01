@@ -42,7 +42,15 @@ interface IEmployeeManagement {
     function depositToTreasury(uint256 _amount) external;
     function viewTreasuryBalance() external view returns (uint256);
 
-    function inviteEmployee(address _employeeAddress, uint256 _salary) external returns (bytes32);
+    function inviteEmployee(
+        address _employee,
+        uint256 _salary,
+        string memory _firstName,
+        string memory _lastName,
+        string memory _position,
+        string memory _department,
+        uint256 _date_hired
+    ) external  returns (bytes32);
     function employeeAcceptInvite(bytes32 _inviteHash) external;
     function employeeRejectInvite(bytes32 _inviteHash) external;
 
