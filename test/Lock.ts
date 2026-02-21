@@ -1,127 +1,153 @@
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
-import hre from "hardhat";
+import { ethers } from "hardhat";
+import { Streamer, Factory, ERC20Mock } from "../typechain-types";
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("Factory + Streamer Payroll System", function () {
+  let factory: Factory;
+  let salaryToken: ERC20Mock;
+  let streamer: Streamer;
+  let owner: any, admin: any, employee: any, outsider: any;
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+  beforeEach(async () => {
+    [owner, admin, employee, outsider] = await ethers.getSigners();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await hre.ethers.getSigners();
+    // Deploy mock ERC20 as salary token
+    const ERC20Mock = await ethers.getContractFactory("ERC20Mock");
+    salaryToken = await ERC20Mock.deploy("Mock USD", "mUSD", owner.address, ethers.parseEther("1000000"));
+    await salaryToken.waitForDeployment();
 
-    const Lock = await hre.ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
+    // Deploy Factory
+    const Factory = await ethers.getContractFactory("Factory");
+    factory = await Factory.deploy();
+    await factory.waitForDeployment();
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
-  }
+    // Create one organisation
+    await factory.connect(owner).createOrganisation(
+      await salaryToken.getAddress(),
+      "MyOrg",
+      "ORG"
+    );
 
-  describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture,
-      );
-
-      expect(await hre.ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount,
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await hre.ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future",
-      );
-    });
+    const orgs = await factory.getOwnedOrganisations();
+    streamer = await ethers.getContractAt("Streamer", orgs[0]);
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  it("should deploy with correct owner and token", async () => {
+    expect(await streamer.owner()).to.equal(owner.address);
+    expect(await streamer.salaryToken()).to.equal(await salaryToken.getAddress());
+  });
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet",
-        );
-      });
+  it("owner can deposit to treasury", async () => {
+    const amount = ethers.parseEther("1000");
+    await salaryToken.connect(owner).approve(await streamer.getAddress(), amount);
+    await streamer.connect(owner).depositToTreasury(amount);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture,
-        );
+    expect(await streamer.viewTreasuryBalance()).to.equal(amount);
+  });
 
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
+  it("admin can invite and employee can accept", async () => {
+    const salary = ethers.parseEther("1000");
 
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner",
-        );
-      });
+     await streamer
+      .connect(owner)
+      .inviteEmployee(employee.address, salary, "John", "Doe", "Engineer", "Tech", Math.floor(Date.now()/1000));
 
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture,
-        );
+    const invite = await streamer.invites(employee.getAddress());
+    
+    await streamer.connect(employee).employeeAcceptInvite(invite.hash);
 
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
+    const empInfo = await streamer.adminGetEmployeeInfoByAddress(employee.address);
+    expect(empInfo.status).to.equal(1); // ACTIVE
+    expect(empInfo.monthlySalary).to.equal(salary);
+  });
 
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
-    });
+  it("employee accrues earnings over time", async () => {
+    const salary = ethers.parseEther("3000");
+    await streamer
+      .connect(owner)
+      .inviteEmployee(employee.address, salary, "John", "Doe", "Engineer", "Tech", Math.floor(Date.now()/1000));
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture,
-        );
+    const invite = await streamer.invites(employee.getAddress());
+    await streamer.connect(employee).employeeAcceptInvite(invite.hash);
 
-        await time.increaseTo(unlockTime);
+    // Fast forward time ~15 days
+    await ethers.provider.send("evm_increaseTime", [15 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
 
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
-    });
+    const earnings = await streamer.getAvailableEarnings(employee.address);
+    expect(earnings).to.be.gt(0);
+  });
 
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture,
-        );
+  it("employee can withdraw salary", async () => {
+    const salary = ethers.parseEther("3000");
+    const amount = ethers.parseEther("1000");
 
-        await time.increaseTo(unlockTime);
+    // deposit treasury
+    await salaryToken.connect(owner).approve(await streamer.getAddress(), ethers.parseEther("10000"));
+    await streamer.connect(owner).depositToTreasury(ethers.parseEther("10000"));
 
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount],
-        );
-      });
-    });
+    await streamer
+      .connect(owner)
+      .inviteEmployee(employee.address, salary, "John", "Doe", "Engineer", "Tech", Math.floor(Date.now()/1000));
+
+    const invite = await streamer.invites(employee.getAddress());
+    await streamer.connect(employee).employeeAcceptInvite(invite.hash);
+
+    // Increase time so they accrue earnings
+    await ethers.provider.send("evm_increaseTime", [31 * 24 * 3600]); // 1 month
+    await ethers.provider.send("evm_mine", []);
+
+    const available = await streamer.getAvailableEarnings(employee.address);
+    
+  
+    expect(available).to.be.gte(salary);
+
+    await streamer.connect(employee).withdrawSalary(amount);
+
+    const bal = await salaryToken.balanceOf(employee.address);
+    expect(bal).to.closeTo(amount, ethers.parseEther('1'));
+  });
+
+  it("factory should register employee with organisation", async () => {
+    const salary = ethers.parseEther("2000");
+    await streamer
+      .connect(owner)
+      .inviteEmployee(employee.address, salary, "John", "Doe", "Engineer", "Tech", Math.floor(Date.now()/1000));
+
+    const invite = await streamer.invites(employee.getAddress());
+    await streamer.connect(employee).employeeAcceptInvite(invite.hash);
+    const employeeOrgs = await factory.connect(employee).getEmployeeOrganisations();
+    expect(employeeOrgs.length).to.equal(1);
+    expect(employeeOrgs[0]).to.equal(await streamer.getAddress());
+  });
+
+  it("owner can add/remove admins", async () => {
+    await streamer.connect(owner).addAdmin(admin.address);
+    expect(await streamer.isAdmin(admin.address)).to.equal(true);
+
+    await streamer.connect(owner).removeAdmin(admin.address);
+    expect(await streamer.isAdmin(admin.address)).to.equal(false);
+  });
+
+  it("admin can punish employee", async () => {
+    const salary = ethers.parseEther("2000");
+    await salaryToken.connect(owner).approve(await streamer.getAddress(), ethers.parseEther("10000"));
+    await streamer.connect(owner).depositToTreasury(ethers.parseEther("10000"));
+
+    const inviteHash = await streamer
+      .connect(owner)
+      .inviteEmployee(employee.address, salary, "Sam", "Lee", "Ops", "Tech", Math.floor(Date.now()/1000));
+    const invite = await streamer.invites(employee.getAddress());
+      await streamer.connect(employee).employeeAcceptInvite(invite.hash);
+
+    // Move time so earnings accrue
+    await ethers.provider.send("evm_increaseTime", [30 * 24 * 3600]);
+    await ethers.provider.send("evm_mine", []);
+
+    const before = await streamer.getAvailableEarnings(employee.address);
+    await streamer.connect(owner).punishEmployee(employee.address, ethers.parseEther("500"));
+
+    const after = await streamer.getAvailableEarnings(employee.address);
+    expect(after).to.be.closeTo(before - ethers.parseEther("500"), ethers.parseEther("1"));
   });
 });
